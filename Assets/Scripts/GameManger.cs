@@ -1,10 +1,7 @@
 using UnityEngine;
 using System.Collections.Generic;
 using TMPro;
-using Unity.Burst.CompilerServices;
 using UnityEngine.SceneManagement;
-
-
 
 public class GameManager : MonoBehaviour
 {
@@ -22,7 +19,6 @@ public class GameManager : MonoBehaviour
     public GameObject gameOverPanel;
     public GameObject levelCompletePanel;
 
-
     [Header("References")]
     public WordEnemy enemyPrefab;
     public Transform enemyParent;
@@ -32,11 +28,9 @@ public class GameManager : MonoBehaviour
     public TMP_Text playerNameText;
     public TMP_Text timerText;
 
-
-
     [Header("Backgrounds")]
-    public SpriteRenderer backgroundRenderer;         // ⬅ CHANGED
-    public List<Sprite> backgrounds = new();          // ⬅ CHANGED
+    public SpriteRenderer backgroundRenderer;
+    public List<Sprite> backgrounds = new();
 
     [Header("Sounds")]
     public AudioSource sfxSource;
@@ -63,13 +57,15 @@ public class GameManager : MonoBehaviour
     private string player1Name;
     private string player2Name;
 
+    // Streak + penalties
     private int streak = 0;
     private const int streakGoal = 3;
     private const int streakBonus = 50;
     private const int mistypePenalty = -10;
-    
+
     [Header("UI Popups")]
     public TMP_Text streakPopup;
+
     void Start()
     {
         const float DefaultBaseFallSpeed = 1.5f;
@@ -119,7 +115,8 @@ public class GameManager : MonoBehaviour
             player2Name = playerUI.player2Name;
         }
 
-        playerNameText.text = player1Name;
+        if (playerNameText != null)
+            playerNameText.text = player1Name;
 
         LoadDictionaries();
         ResetGame();
@@ -187,16 +184,16 @@ public class GameManager : MonoBehaviour
         elapsed = 0f;
         score = 0;
         inputBuffer = "";
-        prevLevel = levelNum;   // not super important now, but fine
+        prevLevel = levelNum;
         fading = false;
         fadeProgress = 0f;
         levelTimer = 60f;
+        streak = 0;
 
         UpdateUI();
         if (timerText != null)
             timerText.text = "Time: " + Mathf.CeilToInt(levelTimer);
     }
-
 
     void Update()
     {
@@ -205,7 +202,8 @@ public class GameManager : MonoBehaviour
 
         // --- Timer logic ---
         levelTimer -= Time.deltaTime;
-        timerText.text = "Time: " + Mathf.CeilToInt(levelTimer);
+        if (timerText != null)
+            timerText.text = "Time: " + Mathf.CeilToInt(levelTimer);
 
         if (levelTimer <= 0f)
         {
@@ -237,11 +235,9 @@ public class GameManager : MonoBehaviour
                 e.MoveDown(baseFallSpeed, speedGrowth, score);
         }
 
-        // --- Background + fail check ---
-        // UpdateBackground(); ///////////////// COMMENT OUT
+        // --- Fail check ---
         CheckGameOver();
     }
-
 
     void CheckGameOver()
     {
@@ -250,19 +246,37 @@ public class GameManager : MonoBehaviour
             if (e != null && e.transform.position.y < -5f)
             {
                 HandleGameOver();
-                break;  // don’t check further once we know it’s over
+                break;
             }
         }
     }
 
+    // NEW: actual game-over handler
+    void HandleGameOver()
+    {
+        if (isGameOver) return;
+        isGameOver = true;
+
+        Debug.Log("GAME OVER");
+
+        // Save score to leaderboard
+        string nameToSave = string.IsNullOrEmpty(player1Name) ? "Player" : player1Name;
+        LeaderboardManager.AddScore(levelNum, nameToSave, score);
+
+        // Show Game Over UI
+        if (gameOverPanel != null)
+            gameOverPanel.SetActive(true);
+
+        // Optionally freeze gameplay
+        Time.timeScale = 0f;
+    }
 
     void SpawnEnemy()
     {
         string word = normalWords[Random.Range(0, normalWords.Count)];
 
-        // Choose a random X within view, and a Y a bit above the top
-        float x = Random.Range(-7f, 7f);   // you can tweak these later
-        float y = 5.5f;                    // slightly above the visible area
+        float x = Random.Range(-7f, 7f);
+        float y = 5.5f;
 
         Vector3 pos = new Vector3(x, y, 0f);
 
@@ -271,7 +285,6 @@ public class GameManager : MonoBehaviour
         enemies.Add(newEnemy);
     }
 
-
     void SpawnMiniBoss()
     {
         string word = miniBossWords[Random.Range(0, miniBossWords.Count)];
@@ -279,7 +292,7 @@ public class GameManager : MonoBehaviour
         WordEnemy newEnemy = Instantiate(enemyPrefab, pos, Quaternion.identity, enemyParent);
         newEnemy.Init(word, true);
         enemies.Add(newEnemy);
-        if (bossClip != null)
+        if (bossClip != null && sfxSource != null)
             sfxSource.PlayOneShot(bossClip);
     }
 
@@ -290,24 +303,20 @@ public class GameManager : MonoBehaviour
         WordEnemy newEnemy = Instantiate(enemyPrefab, pos, Quaternion.identity, enemyParent);
         newEnemy.Init(word, true);
         enemies.Add(newEnemy);
-        if (bossClip != null)
+        if (bossClip != null && sfxSource != null)
             sfxSource.PlayOneShot(bossClip);
     }
 
     void UpdateBackground()
     {
-        // Level starts at 1
         int level = score / levelPoints + 1;
 
-        // Update ninja skin based on level
         if (ninja != null)
             ninja.UpdateSkin(level);
 
         if (level != prevLevel)
         {
             prevLevel = level;
-            // If you still want to trigger skin unlock tracking, you can do:
-            // OnLevelComplete(level);
         }
 
         if (backgrounds == null || backgrounds.Count == 0 || backgroundRenderer == null)
@@ -324,7 +333,6 @@ public class GameManager : MonoBehaviour
                 sfxSource.PlayOneShot(swooshClip);
         }
     }
-
 
     public static void OnLevelComplete(int level)
     {
@@ -353,7 +361,6 @@ public class GameManager : MonoBehaviour
             if (string.IsNullOrEmpty(inputBuffer))
                 return;
 
-            // Look for an exact match with the current buffer
             for (int i = 0; i < enemies.Count; i++)
             {
                 WordEnemy e = enemies[i];
@@ -361,36 +368,38 @@ public class GameManager : MonoBehaviour
 
                 if (string.Equals(inputBuffer, e.Word, System.StringComparison.OrdinalIgnoreCase))
                 {
-                    // Score
-                    score += 10 + e.Word.Length * 2;
+                    // base points for correct word
+                    int gained = 10 + e.Word.Length * 2;
+                    score += gained;
+
+                    // streak handling
+                    streak++;
+                    if (streak >= streakGoal)
+                    {
+                        score += streakBonus;
+                        ShowStreakPopup();
+                        streak = 0;
+                    }
 
                     Vector3 hitPos = e.transform.position;
 
                     ninja.SlashAt(hitPos, () =>
                     {
-                        // Play SFX
                         if (hitClip != null && sfxSource != null)
                             sfxSource.PlayOneShot(hitClip);
 
-                        // Remove enemy
                         if (e != null)
                         {
                             Destroy(e.gameObject);
                             enemies.RemoveAt(i);
                         }
 
-                        // Score (same as before)
-                        score += 10 + e.Word.Length * 2;
-
-                        // Reset input
                         inputBuffer = "";
                         inputBufferText.text = "";
 
                         UpdateUI();
                     });
 
-
-                    // Reset input
                     inputBuffer = "";
                     inputBufferText.text = "";
                     UpdateUI();
@@ -398,7 +407,12 @@ public class GameManager : MonoBehaviour
                 }
             }
 
-            // Enter pressed but no word matched → clear input
+            // Enter pressed but no word matched → mistype penalty
+            score += mistypePenalty;   // -10 points
+            if (score < 0) score = 0;  // clamp at 0 if you want
+            streak = 0;                // break streak on mistype
+            UpdateUI();
+
             inputBuffer = "";
             inputBufferText.text = "";
             return;
@@ -428,45 +442,18 @@ public class GameManager : MonoBehaviour
     }
 
     void ShowStreakPopup()
-{
-   streakPopup.text = "STREAK BONUS!";
-   streakPopup.transform.position = new Vector3(Screen.width / 2, Screen.height / 2, 0);
-   streakPopup.gameObject.SetActive(true);
-}
+    {
+        if (streakPopup == null) return;
+
+        streakPopup.text = "STREAK BONUS!";
+        streakPopup.transform.position = new Vector3(Screen.width / 2f, Screen.height / 2f, 0);
+        streakPopup.gameObject.SetActive(true);
+    }
 
     void UpdateUI()
     {
-        scoreText.text = "Score: " + score;
-    }
-
-    void HandleGameOver()
-    {
-        if (isGameOver) return;
-
-        isGameOver = true;
-        Debug.Log("Game Over!");
-
-        // Stop all movement/spawn logic
-        // (Update() early-return already prevents new spawns)
-        foreach (WordEnemy e in enemies)
-        {
-            if (e != null)
-                e.enabled = false;  // if needed; mostly cosmetic
-        }
-
-        // Show Game Over UI
-        gameOverPanel.SetActive(true);
-    }
-
-    public void RetryLevel()
-    {
-        // Clear level progress so retry starts this level fresh
-        PlayerPrefs.DeleteKey("ContinueFromLevel");
-        PlayerPrefs.DeleteKey("levelNum");
-        PlayerPrefs.DeleteKey("baseFallSpeed");
-        PlayerPrefs.DeleteKey("bgIndex");
-
-        UnityEngine.SceneManagement.SceneManager.LoadScene("GameplayScreen");
+        if (scoreText != null)
+            scoreText.text = "Score: " + score;
     }
 
     void HandleLevelComplete()
@@ -476,20 +463,18 @@ public class GameManager : MonoBehaviour
 
         Debug.Log("Level Complete!");
 
-        // Increase difficulty for next level
-        //baseFallSpeed += 0.2f;
-        //levelNum++;
+        string nameToSave = string.IsNullOrEmpty(player1Name) ? "Player" : player1Name;
+        LeaderboardManager.AddScore(levelNum, nameToSave, score);
 
-        // Show Level Complete UI
-        levelCompletePanel.SetActive(true);
+        if (levelCompletePanel != null)
+            levelCompletePanel.SetActive(true);
     }
 
     public void NextLevel()
     {
-        levelNum++;             // Increase the level
-        baseFallSpeed += 0.2f;  // Increase difficulty
+        levelNum++;
+        baseFallSpeed += 0.2f;
 
-        // Store these values so they persist ONLY for the immediate next scene load
         PlayerPrefs.SetInt("ContinueFromLevel", 1);
         PlayerPrefs.SetInt("levelNum", levelNum);
         PlayerPrefs.SetFloat("baseFallSpeed", baseFallSpeed);
@@ -498,26 +483,21 @@ public class GameManager : MonoBehaviour
             PlayerPrefs.SetInt("bgIndex", levelNum % backgrounds.Count);
 
         PlayerPrefs.Save();
-
-        UnityEngine.SceneManagement.SceneManager.LoadScene("GameplayScreen");
+        SceneManager.LoadScene("GameplayScreen");
     }
-
 
     public void BackToMenu()
     {
-        // New game from the menu should always be level 1 / speed 1.5 / first background
         PlayerPrefs.DeleteKey("ContinueFromLevel");
         PlayerPrefs.DeleteKey("levelNum");
         PlayerPrefs.DeleteKey("baseFallSpeed");
         PlayerPrefs.DeleteKey("bgIndex");
 
-        UnityEngine.SceneManagement.SceneManager.LoadScene("MenuScreen");
+        SceneManager.LoadScene("MenuScreen");
     }
-
 
     public void Quit()
     {
         Application.Quit();
     }
-
 }
